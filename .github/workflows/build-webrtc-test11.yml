@@ -1,0 +1,85 @@
+name: Build WebRTC TEST11 80ms
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Free runner disk
+        shell: bash
+        run: |
+          set -euxo pipefail
+          df -h /
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo docker system prune -af || true
+          df -h /
+
+      - name: Checkout official webrtc-build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/webrtc-sdk/webrtc-build.git "$GITHUB_WORKSPACE/webrtc-build"
+
+      - name: Configure TEST11 build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/webrtc-build"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('build/run.py')
+          s = p.read_text()
+
+          # Build only the ABI used by L-Bell TEST11.
+          old_arch = "ANDROID_ARCHS = ['armeabi-v7a', 'arm64-v8a', 'x86_64', 'x86']"
+          new_arch = "ANDROID_ARCHS = ['arm64-v8a']"
+          if s.count(old_arch) != 1:
+              raise SystemExit(f'ANDROID_ARCHS match count={s.count(old_arch)}')
+          s = s.replace(old_arch, new_arch)
+
+          # Apply our NetEq change after official webrtc-sdk patches are applied,
+          # but before compilation starts.
+          needle = "                apply_patch(os.path.join(patch_dir, patch), dir, depth)\n"
+          if s.count(needle) != 1:
+              raise SystemExit(f'patch insertion point count={s.count(needle)}')
+          injection = needle + "\n            if target == 'android':\n                neteq = os.path.join(src_dir, 'modules', 'audio_coding', 'neteq', 'neteq_impl.cc')\n                text = open(neteq, encoding='utf-8').read()\n                old = 'controller_->SetMaximumDelay(config.max_delay_ms);'\n                new = 'controller_->SetMaximumDelay(80);  // TEST11: L-Bell low-latency NetEq cap'\n                if text.count(old) != 1:\n                    raise Exception(f'TEST11 expected one NetEq match, got {text.count(old)}')\n                open(neteq, 'w', encoding='utf-8').write(text.replace(old, new))\n                logging.info('TEST11 NetEq 80ms patch applied')\n"
+          s = s.replace(needle, injection)
+          p.write_text(s)
+          PY
+          grep -n "ANDROID_ARCHS =" build/run.py
+          grep -n "TEST11 NetEq" build/run.py
+
+      - name: Build official M150 pipeline with TEST11 patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/webrtc-build/build"
+          ./build.android.sh ba469aa2093ba950066258ca0a59a6fbd1295582
+
+      - name: Inspect package
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$GITHUB_WORKSPACE/webrtc-build/build/_package/android"
+          ls -lh
+          tar -tzf webrtc.tar.gz | head -100
+
+      - name: Upload TEST11 package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-m150-TEST11-80ms-arm64
+          path: webrtc-build/build/_package/android/webrtc.tar.gz
+          retention-days: 30
