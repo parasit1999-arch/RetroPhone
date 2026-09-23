@@ -42,7 +42,7 @@ jobs:
           s = p.read_text()
 
           old_arch = "ANDROID_ARCHS = ['armeabi-v7a', 'arm64-v8a', 'x86_64', 'x86']"
-          new_arch = "ANDROID_ARCHS = ['arm64-v8a']"
+          new_arch = "ANDROID_ARCHS = ['armeabi-v7a', 'arm64-v8a']"
           if s.count(old_arch) != 1:
               raise SystemExit(f'ANDROID_ARCHS match count={s.count(old_arch)}')
           s = s.replace(old_arch, new_arch)
@@ -57,8 +57,6 @@ jobs:
           grep -n "ANDROID_ARCHS =" build/run.py
           grep -n "TEST11 NetEq" build/run.py
 
-          # The official Android build already creates libwebrtc.aar, but its
-          # Docker image normally exports only webrtc.tar.gz. Export the AAR too.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('build/android/Dockerfile')
@@ -93,12 +91,13 @@ jobs:
           cd "$GITHUB_WORKSPACE/webrtc-build/build/_package/android"
           ls -lh libwebrtc.aar
           unzip -l libwebrtc.aar | grep -F "classes.jar"
+          unzip -l libwebrtc.aar | grep -F "jni/armeabi-v7a/libjingle_peerconnection_so.so"
           unzip -l libwebrtc.aar | grep -F "jni/arm64-v8a/libjingle_peerconnection_so.so"
 
       - name: Upload TEST11 package
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: libwebrtc-m150-TEST11-80ms-arm64-aar
+          name: libwebrtc-m150-TEST11-80ms-universal-aar
           path: webrtc-build/build/_package/android/libwebrtc.aar
           retention-days: 30
