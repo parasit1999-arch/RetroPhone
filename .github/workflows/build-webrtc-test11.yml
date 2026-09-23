@@ -41,15 +41,12 @@ jobs:
           p = Path('build/run.py')
           s = p.read_text()
 
-          # Build only the ABI used by L-Bell TEST11.
           old_arch = "ANDROID_ARCHS = ['armeabi-v7a', 'arm64-v8a', 'x86_64', 'x86']"
           new_arch = "ANDROID_ARCHS = ['arm64-v8a']"
           if s.count(old_arch) != 1:
               raise SystemExit(f'ANDROID_ARCHS match count={s.count(old_arch)}')
           s = s.replace(old_arch, new_arch)
 
-          # Apply our NetEq change after official webrtc-sdk patches are applied,
-          # but before compilation starts.
           needle = "                apply_patch(os.path.join(patch_dir, patch), dir, depth)\n"
           if s.count(needle) != 1:
               raise SystemExit(f'patch insertion point count={s.count(needle)}')
@@ -73,8 +70,10 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$GITHUB_WORKSPACE/webrtc-build/build/_package/android"
-          ls -lh
-          tar -tzf webrtc.tar.gz | head -100
+          ls -lh webrtc.tar.gz
+          tar -tzf webrtc.tar.gz > package-contents.txt
+          grep -F "webrtc/lib/arm64-v8a/libwebrtc.a" package-contents.txt
+          grep -F "webrtc/jar/webrtc.jar" package-contents.txt
 
       - name: Upload TEST11 package
         if: success()
