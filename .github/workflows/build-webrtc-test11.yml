@@ -57,6 +57,27 @@ jobs:
           grep -n "ANDROID_ARCHS =" build/run.py
           grep -n "TEST11 NetEq" build/run.py
 
+          # The official Android build already creates libwebrtc.aar, but its
+          # Docker image normally exports only webrtc.tar.gz. Export the AAR too.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('build/android/Dockerfile')
+          s = p.read_text()
+          old = 'COPY --from=builder /webrtc.tar.gz /\n'
+          new = old + 'COPY --from=builder /root/_source/android/webrtc/src/out/aar/libwebrtc.aar /libwebrtc.aar\n'
+          if s.count(old) != 1:
+              raise SystemExit(f'Dockerfile export match count={s.count(old)}')
+          p.write_text(s.replace(old, new))
+
+          p = Path('build/build.android.sh')
+          s = p.read_text()
+          old = 'docker container cp $CONTAINER_ID:/webrtc.tar.gz $PACKAGE_DIR/webrtc.tar.gz\n'
+          new = old + 'docker container cp $CONTAINER_ID:/libwebrtc.aar $PACKAGE_DIR/libwebrtc.aar\n'
+          if s.count(old) != 1:
+              raise SystemExit(f'build.android.sh export match count={s.count(old)}')
+          p.write_text(s.replace(old, new))
+          PY
+
       - name: Build official M150 pipeline with TEST11 patch
         shell: bash
         run: |
@@ -70,15 +91,14 @@ jobs:
         run: |
           set -euxo pipefail
           cd "$GITHUB_WORKSPACE/webrtc-build/build/_package/android"
-          ls -lh webrtc.tar.gz
-          tar -tzf webrtc.tar.gz > package-contents.txt
-          grep -F "webrtc/lib/arm64-v8a/libwebrtc.a" package-contents.txt
-          grep -F "webrtc/jar/webrtc.jar" package-contents.txt
+          ls -lh libwebrtc.aar
+          unzip -l libwebrtc.aar | grep -F "classes.jar"
+          unzip -l libwebrtc.aar | grep -F "jni/arm64-v8a/libjingle_peerconnection_so.so"
 
       - name: Upload TEST11 package
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: webrtc-m150-TEST11-80ms-arm64
-          path: webrtc-build/build/_package/android/webrtc.tar.gz
+          name: libwebrtc-m150-TEST11-80ms-arm64-aar
+          path: webrtc-build/build/_package/android/libwebrtc.aar
           retention-days: 30
